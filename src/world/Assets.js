@@ -32,11 +32,18 @@ export class Assets {
     this.textures = new Map();
     this.materials = new Map();
     this.models = new Map();
+    this.pending = []; // one promise per texture load (resolved on load or error)
     this.aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   }
 
+  _track(loadFn) {
+    let t;
+    this.pending.push(new Promise((res) => { t = loadFn(() => res(), () => { console.warn('texture failed', t?.name); res(); }); }));
+    return t;
+  }
+
   _tex(url, srgb) {
-    const t = this.texLoader.load(url);
+    const t = this._track((ok, fail) => this.texLoader.load(url, ok, undefined, fail));
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = this.aniso;
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
@@ -101,8 +108,8 @@ export class Assets {
       this.gltf.loadAsync(BASE + 'models/creature/LeePerrySmith.glb'),
     ]);
     const tl = this.texLoader;
-    const col = tl.load(BASE + 'models/creature/Map-COL.webp'); col.colorSpace = THREE.SRGBColorSpace; col.flipY = false;
-    const nor = tl.load(BASE + 'models/creature/Infinite-Level_02_Tangent_SmoothUV.webp'); nor.flipY = false;
+    const col = this._track((ok, fail) => tl.load(BASE + 'models/creature/Map-COL.webp', ok, undefined, fail)); col.colorSpace = THREE.SRGBColorSpace; col.flipY = false;
+    const nor = this._track((ok, fail) => tl.load(BASE + 'models/creature/Infinite-Level_02_Tangent_SmoothUV.webp', ok, undefined, fail)); nor.flipY = false;
     this.creature = { bot, head: head.scene, headCol: col, headNor: nor };
   }
 

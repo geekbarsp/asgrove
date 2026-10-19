@@ -81,7 +81,8 @@ export class Game {
       this.assets.loadCreature().then(() => { prog.creature = 1; upd(); }),
       this.audio.init((p) => { prog.audio = p; upd(); }),
     ]);
-    await new Promise((res) => { if (this.assets.manager.itemsLoaded >= this.assets.manager.itemsTotal) res(); else this.assets.manager.onLoad = res; setTimeout(res, 120000); });
+    text.textContent = 'Hanging the wallpaper…';
+    await Promise.all(this.assets.pending);
     text.textContent = 'Preparing the textures…';
     await this.uploadTextures();
 
