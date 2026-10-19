@@ -530,7 +530,7 @@ export class Story {
     const scr = this.g.props.named.tvScreen;
     const c = scr.userData.canvas, x = c.getContext('2d');
     const w = c.width, h = c.height;
-    const img = x.createImageData(w, h);
+    const img = this._tvImg || (this._tvImg = x.createImageData(w, h));
     for (let i = 0; i < img.data.length; i += 4) { const v = Math.random() * 200; img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v * 1.05; img.data[i + 3] = 255; }
     x.putImageData(img, 0, 0);
     const cyc = t % 5;

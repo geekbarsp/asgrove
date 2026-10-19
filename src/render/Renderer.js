@@ -6,13 +6,29 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
+// lights = max simultaneous point lights (nearest practical lights are pooled into these slots)
+// minScale/maxScale bound the adaptive resolution scaler
 export const QUALITY = {
-  low: { pixelRatio: 0.75, shadow: 512, ao: false, bloom: false, smaa: false, extraLights: false, aniso: 2 },
-  medium: { pixelRatio: 1, shadow: 1024, ao: false, bloom: true, smaa: true, extraLights: true, aniso: 4 },
-  high: { pixelRatio: 1.25, shadow: 1024, ao: true, bloom: true, smaa: true, extraLights: true, aniso: 8 },
-  ultra: { pixelRatio: 2, shadow: 2048, ao: true, bloom: true, smaa: true, extraLights: true, aniso: 16 },
+  low: { maxScale: 0.75, minScale: 0.5, shadow: 512, softShadows: false, ao: false, bloom: false, aa: 'fxaa', lights: 2, extraLights: false, aniso: 2, dust: 300 },
+  medium: { maxScale: 1, minScale: 0.6, shadow: 1024, softShadows: false, ao: false, bloom: true, aa: 'fxaa', lights: 3, extraLights: true, aniso: 4, dust: 500 },
+  high: { maxScale: 1.25, minScale: 0.7, shadow: 1024, softShadows: true, ao: false, bloom: true, aa: 'fxaa', lights: 4, extraLights: true, aniso: 8, dust: 700 },
+  ultra: { maxScale: 2, minScale: 0.85, shadow: 2048, softShadows: true, ao: true, bloom: true, aa: 'smaa', lights: 6, extraLights: true, aniso: 16, dust: 900 },
 };
+
+// Pick a sensible default from the GPU name (integrated / mobile GPUs start lower).
+export function detectQuality(renderer) {
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) || '';
+    if (/swiftshader|llvmpipe|software|microsoft basic/i.test(name)) return 'low';
+    if (/intel|uhd|iris|mali|adreno|powervr|apple gpu|vega \d+ graphics|radeon\(tm\) graphics/i.test(name)) return 'medium';
+    if (/rtx\s*(30|40|50)|rx\s*(6[789]|7[789]|9)\d{2}|apple m\d (pro|max|ultra)/i.test(name)) return 'ultra';
+    return 'high';
+  } catch { return 'medium'; }
+}
 
 // Camera "lens": chromatic aberration, sensor grain, vignette, grading, fear distortion.
 const FilmShader = {
@@ -84,15 +100,22 @@ export class Renderer {
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     this.quality = 'high';
     this.composer = null;
+    this.scale = 1;
+    this.frameTimes = [];
+    this.adaptT = 0;
   }
+
+  get dpr() { return Math.min(window.devicePixelRatio || 1, 2); }
 
   setup(scene, camera, quality = 'high') {
     this.scene = scene;
     this.camera = camera;
     this.quality = quality;
-    const q = QUALITY[quality];
+    const q = this.q = QUALITY[quality];
     const r = this.renderer;
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
+    r.shadowMap.type = q.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    this.scale = Math.min(q.maxScale, this.dpr);
+    r.setPixelRatio(this.scale);
     const w = innerWidth, h = innerHeight;
     r.setSize(w, h, false);
 
@@ -116,11 +139,13 @@ export class Renderer {
       comp.addPass(this.bloom);
     }
     comp.addPass(new OutputPass());
-    if (q.smaa) comp.addPass(new SMAAPass(w * r.getPixelRatio(), h * r.getPixelRatio()));
+    this.fxaa = null;
+    if (q.aa === 'smaa') comp.addPass(new SMAAPass(w * r.getPixelRatio(), h * r.getPixelRatio()));
+    else if (q.aa === 'fxaa') { this.fxaa = new ShaderPass(FXAAShader); comp.addPass(this.fxaa); }
     this.film = new ShaderPass(FilmShader);
     comp.addPass(this.film);
-    this.film.uniforms.uRes.value.set(w * r.getPixelRatio(), h * r.getPixelRatio());
     this.composer = comp;
+    this._applySize();
 
     if (!this._onResize) {
       this._onResize = () => this.resize();
@@ -128,17 +153,41 @@ export class Renderer {
     }
   }
 
-  resize() {
-    const w = innerWidth, h = innerHeight;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+  _applySize() {
+    const w = innerWidth, h = innerHeight, pr = this.scale;
+    this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
+    this.composer.setPixelRatio(pr);
     this.composer.setSize(w, h);
-    this.film.uniforms.uRes.value.set(w * this.renderer.getPixelRatio(), h * this.renderer.getPixelRatio());
+    this.film.uniforms.uRes.value.set(w * pr, h * pr);
+    if (this.fxaa) this.fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
   }
 
-  render(dt) {
+  resize() {
+    this.camera.aspect = innerWidth / innerHeight;
+    this.camera.updateProjectionMatrix();
+    this._applySize();
+  }
+
+  // Dynamic resolution: drop render scale when frames run long, restore it when there is headroom.
+  _adapt(dt) {
+    this.frameTimes.push(dt);
+    this.adaptT += dt;
+    if (this.adaptT < 1.5) return;
+    const ft = this.frameTimes.slice().sort((a, b) => a - b);
+    const p75 = ft[Math.floor(ft.length * 0.75)];
+    this.frameTimes.length = 0;
+    this.adaptT = 0;
+    const max = Math.min(this.q.maxScale, this.dpr), min = this.q.minScale;
+    let next = this.scale;
+    if (p75 > 1 / 50 && this.scale > min) next = Math.max(min, this.scale - (p75 > 1 / 30 ? 0.2 : 0.1));
+    else if (p75 < 1 / 75 && this.scale < max) next = Math.min(max, this.scale + 0.05);
+    if (Math.abs(next - this.scale) > 0.01) { this.scale = next; this._applySize(); }
+  }
+
+  render(dt, adapt = true) {
     this.film.uniforms.uTime.value += dt;
+    if (adapt && this.q) this._adapt(dt);
     this.composer.render(dt);
   }
 }

@@ -105,6 +105,9 @@ export class Props {
     this.named = {};        // special objects for story
     this.rats = [];
     this.rockers = [];
+    this.statics = [];      // placed objects whose matrices get frozen after populate()
+    this.pool = [];         // the few real PointLights shared by all light sources
+    this._cam = new THREE.Vector3();
   }
 
   bbox(id) {
@@ -113,7 +116,7 @@ export class Props {
   }
 
   // Place a model. side: 'N'|'S'|'E'|'W' puts its back against that wall coordinate `wall`.
-  place(id, { x = 0, z = 0, y = 0, rot = 0, side = null, wall = 0, collide = true, los = false, fitH = 0, scale = 1, shrink = 0.06, name = null, cast = true } = {}) {
+  place(id, { x = 0, z = 0, y = 0, rot = 0, side = null, wall = 0, collide = true, los = false, fitH = 0, scale = 1, shrink = 0.06, name = null, cast = true, dynamic = false } = {}) {
     const obj = this.assets.model(id);
     let s = scale;
     const b0 = new THREE.Box3().setFromObject(obj);
@@ -126,9 +129,12 @@ export class Props {
     if (side === 'E') { rot = -90; x = wall - F - back; }
     obj.position.set(x, y, z);
     obj.rotation.y = deg(rot);
-    if (!cast) obj.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+    // small props don't need to cast flashlight shadows (saves shadow-pass draw calls)
+    const size = b0.getSize(new THREE.Vector3()).multiplyScalar(s);
+    if (!cast || Math.max(size.x, size.y, size.z) < 0.55) obj.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     this.scene.add(obj);
     obj.updateMatrixWorld(true);
+    if (!dynamic) this.statics.push(obj);
     if (collide) {
       const b = new THREE.Box3().setFromObject(obj);
       this.level.addCollider({ minX: b.min.x + shrink, maxX: b.max.x - shrink, minZ: b.min.z + shrink, maxZ: b.max.z - shrink, prop: id }, { los });
@@ -137,17 +143,50 @@ export class Props {
     return obj;
   }
 
-  addLight({ x, y, z, color = 0xffa955, intensity = 1.2, distance = 6, kind = 'candle', power = false, shadow = false, flame = null }) {
-    const l = new THREE.PointLight(color, power ? 0 : intensity, distance, 2);
-    l.position.set(x, y, z);
-    if (shadow) {
-      l.castShadow = true; l.shadow.mapSize.set(512, 512); l.shadow.bias = -0.002; l.shadow.radius = 4;
-      l.shadow.camera.near = 0.1; l.shadow.camera.far = distance;
-    }
-    this.scene.add(l);
-    const rec = { light: l, base: intensity, kind, power, flame, seed: Math.random() * 100, on: !power };
+  // A light *source*. Real PointLights come from a small pool assigned each frame to the most relevant sources.
+  addLight({ x, y, z, color = 0xffa955, intensity = 1.2, distance = 6, kind = 'candle', power = false, flame = null }) {
+    const rec = { src: true, pos: new THREE.Vector3(x, y, z), color: new THREE.Color(color), distance, base: intensity, value: 0, kind, power, flame, seed: Math.random() * 100, on: !power };
     this.lights.push(rec);
     return rec;
+  }
+
+  _buildPool() {
+    for (let i = 0; i < this.q.lights; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 1, 2);
+      l.userData.src = null;
+      this.scene.add(l);
+      this.pool.push(l);
+    }
+  }
+
+  _freezeStatics() {
+    for (const obj of this.statics) {
+      obj.traverse((o) => { o.updateMatrix(); o.matrixAutoUpdate = false; });
+      obj.updateMatrixWorld(true);
+    }
+  }
+
+  // Assign pooled lights to the light sources that matter most to the camera right now.
+  _assignPool(camPos) {
+    const cands = [];
+    for (const L of this.lights) {
+      if (!L.src || L.value < 0.01) continue;
+      const d = L.pos.distanceTo(camPos);
+      if (d > L.distance + 7) continue;
+      L.score = L.value * L.distance / (1 + Math.max(0, d - L.distance * 0.35) ** 2);
+      cands.push(L);
+    }
+    cands.sort((a, b) => b.score - a.score);
+    const chosen = new Set(cands.slice(0, this.pool.length));
+    // keep stable slots for sources that stay chosen, refill the rest
+    const free = [];
+    for (const l of this.pool) { if (l.userData.src && chosen.has(l.userData.src)) chosen.delete(l.userData.src); else free.push(l); }
+    for (const l of free) { const s = chosen.values().next().value; if (s) chosen.delete(s); l.userData.src = s || null; }
+    for (const l of this.pool) {
+      const s = l.userData.src;
+      if (!s) { l.intensity = 0; continue; }
+      l.position.copy(s.pos); l.color.copy(s.color); l.distance = s.distance; l.intensity = s.value;
+    }
   }
 
   candle(x, y, z, { light = true, intensity = 0.9, distance = 5, holder = true } = {}) {
@@ -262,7 +301,7 @@ export class Props {
     // ===== Nursery (x 10.5-18, z 0-6) =====
     N.crib = P('old_bed_frame', { x: 12.0, side: 'N', wall: 0, fitH: 1.2 });
     N.nurseryMirror = this.hanging('ornate_mirror_01', 12.0, 2.05, F, 0);
-    const rocker = P('Rockingchair_01', { x: 16.6, z: 1.5, rot: -130 });
+    const rocker = P('Rockingchair_01', { x: 16.6, z: 1.5, rot: -130, dynamic: true });
     this.rockers.push({ obj: rocker, amp: 0, phase: 0 });
     N.rocker = rocker;
     P('spinning_wheel_01', { x: 16.8, z: 4.7, rot: -100 });
@@ -297,7 +336,7 @@ export class Props {
     this.hanging('fancy_picture_frame_01', 31.5 + F, 1.7, 9.4, 90);
 
     // ===== Study (x 1.5-10.5, z 7.5-16.5) =====
-    N.clock = P('vintage_grandfather_clock_01', { x: 6.2, side: 'N', wall: 7.5, los: true });
+    N.clock = P('vintage_grandfather_clock_01', { x: 6.2, side: 'N', wall: 7.5, los: true, dynamic: true });
     P('wooden_bookshelf_worn', { x: 3.25, side: 'S', wall: 16.5, los: true });
     P('wooden_bookshelf_worn', { x: 4.65, side: 'S', wall: 16.5, los: true });
     N.studyDesk = P('WoodenTable_03', { x: 6.0, z: 11.9, rot: 0 });
@@ -371,7 +410,7 @@ export class Props {
     this.hanging('pull_chain_light_socket', 21.75, WALL_H, 24.6, 0, { cast: false });
 
     // ===== Cellar (x 9-25.5, z 30-42, y -3) =====
-    N.fuseBox = P('power_box_01', { x: 16.0, y: YC + 1.45, side: 'N', wall: 30, collide: false });
+    N.fuseBox = P('power_box_01', { x: 16.0, y: YC + 1.45, side: 'N', wall: 30, collide: false, dynamic: true });
     P('steel_frame_shelves_01', { y: YC, z: 32.8, side: 'W', wall: 9, fitH: 1.9, los: true });
     P('steel_frame_shelves_01', { y: YC, z: 34.1, side: 'W', wall: 9, fitH: 1.9, los: true });
     P('cardboard_box_01', { x: 9.5, y: YC + 0.98, z: 32.7, rot: 90, collide: false });
@@ -387,11 +426,11 @@ export class Props {
     P('wheelchair_01', { x: 23.6, y: YC, z: 31.4, rot: 200 });
     this.hanging('pull_chain_light_socket', 14.0, YC + WALL_H - 0.22, 33.5, 0, { cast: false });
     this.hanging('pull_chain_light_socket', 19.0, YC + WALL_H - 0.22, 39.0, 0, { cast: false });
-    this.addLight({ x: 14.0, y: YC + 2.45, z: 33.5, intensity: 2.2, distance: 9, color: 0xffcf90, kind: 'bulb', power: true, shadow: this.q.extraLights });
+    this.addLight({ x: 14.0, y: YC + 2.45, z: 33.5, intensity: 2.2, distance: 9, color: 0xffcf90, kind: 'bulb', power: true });
     this.addLight({ x: 19.0, y: YC + 2.45, z: 39.0, intensity: 1.8, distance: 8, color: 0xffcf90, kind: 'bulb', power: true });
     this.decal(canvasPlane(2.6, 1.0, bloodWriting('WE KEPT IT DOWN HERE', { size: 80 }), { px: 1024 }), 9 + F + 0.004, YC + 1.8, 37.8, { rotY: Math.PI / 2 });
     for (let i = 0; i < 2; i++) {
-      const rat = this.place('street_rat', { x: 12 + i * 8, y: YC, z: 36 + i * 3, collide: false, scale: 1.6 });
+      const rat = this.place('street_rat', { x: 12 + i * 8, y: YC, z: 36 + i * 3, collide: false, scale: 1.6, dynamic: true });
       this.rats.push({ obj: rat, target: rat.position.clone(), wait: Math.random() * 3, area: [9.6, 24.8, 30.6, 41.4] });
     }
 
@@ -406,7 +445,7 @@ export class Props {
     this.boiler(31.2, 40.2);
     [[26.4, 36.9], [27.3, 36.9], [26.4, 41.2]].forEach(([x, z]) => P('wine_barrel_01', { x, y: YC, z }));
     P('medical_box', { x: 29.0, y: YC, z: 41.4, rot: 10, collide: false });
-    const rat = this.place('street_rat', { x: 28, y: YC, z: 39, collide: false, scale: 1.6 });
+    const rat = this.place('street_rat', { x: 28, y: YC, z: 39, collide: false, scale: 1.6, dynamic: true });
     this.rats.push({ obj: rat, target: rat.position.clone(), wait: 1, area: [25.8, 29.5, 37.6, 41.6] });
 
     // TV screen (canvas, updated by story when powered)
@@ -415,6 +454,8 @@ export class Props {
     N.tvScreen = scr;
     this.decal(scr, 18.64, 0.55 + 0.255, 16.5 - F - 0.3 - 0.215, { rotY: Math.PI });
     N.tvLight = this.addLight({ x: 18.6, y: 0.9, z: 15.2, intensity: 0.9, distance: 5, color: 0x9fb8ff, kind: 'tv', power: true });
+    this._buildPool();
+    this._freezeStatics();
   }
 
   boiler(x, z) {
@@ -438,7 +479,7 @@ export class Props {
   }
 
   // ---------- animation ----------
-  update(dt, t, power) {
+  update(dt, t, power, camPos) {
     for (const L of this.lights) {
       let k = 1;
       if (L.kind === 'candle' || L.kind === 'fire' || L.kind === 'lamp' || (!L.kind && L.flame)) {
@@ -460,8 +501,9 @@ export class Props {
       } else if (L.kind === 'tv') {
         k = power ? 0.6 + Math.random() * 0.4 : 0;
       } else if (L.kind === 'moon') k = 1;
-      if (L.light) L.light.intensity = L.base * k * (L.dim ?? 1);
+      if (L.src) L.value = L.base * k * (L.dim ?? 1);
     }
+    if (camPos) this._assignPool(camPos);
     for (const r of this.rockers) {
       r.amp = Math.max(0, r.amp - dt * 0.05);
       r.phase += dt * 2.4;

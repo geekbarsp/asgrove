@@ -53,7 +53,7 @@ export class AudioEngine {
     let n = 0;
     await Promise.all(SAMPLE_NAMES.map(async (name) => {
       try {
-        const res = await fetch(`/assets/sounds/${name}.ogg`);
+        const res = await fetch(`${import.meta.env.BASE_URL}assets/sounds/${name}.ogg`);
         const ab = await res.arrayBuffer();
         this.buffers.set(name, await ctx.decodeAudioData(ab));
       } catch (e) { console.warn('sound failed', name, e); }

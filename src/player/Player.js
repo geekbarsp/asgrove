@@ -121,10 +121,11 @@ export class Player {
 
     // integrate with collision (sub-steps)
     const steps = 3;
+    const boxes = this.level.nearbyColliders(this.pos.x, this.pos.z, 1.5);
     for (let i = 0; i < steps; i++) {
       this.pos.x += this.vel.x * dt / steps;
       this.pos.z += this.vel.z * dt / steps;
-      this.collide();
+      this.collide(boxes);
     }
     const groundY = this.level.heightAt(this.pos.x, this.pos.z);
     this.pos.y += (groundY - this.pos.y) * Math.min(1, dt * 18);
@@ -159,8 +160,7 @@ export class Player {
     this.onNoise?.(this.pos.clone(), radius, 'step');
   }
 
-  collide() {
-    const boxes = this.level.nearbyColliders(this.pos.x, this.pos.z, 1.5);
+  collide(boxes = this.level.nearbyColliders(this.pos.x, this.pos.z, 1.5)) {
     for (let iter = 0; iter < 2; iter++) {
       for (const b of boxes) {
         const cx = THREE.MathUtils.clamp(this.pos.x, b.minX, b.maxX);

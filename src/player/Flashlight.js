@@ -57,13 +57,13 @@ export class Flashlight {
     this.cur = 0;
     this.baseIntensity = 40;
 
-    const spot = new THREE.SpotLight(0xfff0d8, 0, 28, 0.52, 0.6, 1.7);
+    const spot = new THREE.SpotLight(0xfff0d8, 0, 20, 0.52, 0.6, 1.7);
     spot.castShadow = true;
     spot.shadow.mapSize.set(quality.shadow, quality.shadow);
     spot.shadow.bias = -0.00008;
     spot.shadow.normalBias = 0.025;
     spot.shadow.camera.near = 0.15;
-    spot.shadow.camera.far = 26;
+    spot.shadow.camera.far = 20;
     spot.shadow.radius = 3;
     spot.map = makeCookie();
     this.spot = spot;
@@ -82,7 +82,7 @@ export class Flashlight {
     scene.add(this.beam);
 
     // dust motes inside the beam
-    const N = 900;
+    const N = quality.dust ?? 700;
     const pos = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) { pos[i * 3] = (Math.random() - 0.5) * 6; pos[i * 3 + 1] = (Math.random() - 0.5) * 3; pos[i * 3 + 2] = (Math.random() - 0.5) * 6; }
     const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));

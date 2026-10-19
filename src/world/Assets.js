@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+
+// Relative to the page so the build works from any sub-path (e.g. GitHub Pages)
+export const BASE = import.meta.env.BASE_URL + 'assets/';
 
 // Real-world size (metres) of one tile of each Poly Haven texture.
 export const TEX_SIZE = {
@@ -24,6 +28,7 @@ export class Assets {
     this.manager = new THREE.LoadingManager();
     this.texLoader = new THREE.TextureLoader(this.manager);
     this.gltf = new GLTFLoader(this.manager);
+    this.gltf.setMeshoptDecoder(MeshoptDecoder);
     this.textures = new Map();
     this.materials = new Map();
     this.models = new Map();
@@ -40,11 +45,11 @@ export class Assets {
 
   textureSet(id) {
     if (!this.textures.has(id)) {
-      const base = `/assets/textures/${id}/`;
+      const base = `${BASE}textures/${id}/`;
       this.textures.set(id, {
-        map: this._tex(base + 'diff.jpg', true),
-        normalMap: this._tex(base + 'nor.jpg', false),
-        arm: this._tex(base + 'arm.jpg', false),
+        map: this._tex(base + 'diff.webp', true),
+        normalMap: this._tex(base + 'nor.webp', false),
+        arm: this._tex(base + 'arm.webp', false),
       });
     }
     return this.textures.get(id);
@@ -72,7 +77,7 @@ export class Assets {
     let done = 0;
     await Promise.all(ids.map(async (id) => {
       try {
-        const g = await this.gltf.loadAsync(`/assets/models/${id}/${id}.gltf`);
+        const g = await this.gltf.loadAsync(`${BASE}models/${id}.glb`);
         g.scene.traverse((o) => {
           if (o.isMesh) {
             o.castShadow = true;
@@ -92,12 +97,12 @@ export class Assets {
 
   async loadCreature() {
     const [bot, head] = await Promise.all([
-      this.gltf.loadAsync('/assets/models/creature/Xbot.glb'),
-      this.gltf.loadAsync('/assets/models/creature/LeePerrySmith.glb'),
+      this.gltf.loadAsync(BASE + 'models/creature/Xbot.glb'),
+      this.gltf.loadAsync(BASE + 'models/creature/LeePerrySmith.glb'),
     ]);
     const tl = this.texLoader;
-    const col = tl.load('/assets/models/creature/Map-COL.jpg'); col.colorSpace = THREE.SRGBColorSpace; col.flipY = false;
-    const nor = tl.load('/assets/models/creature/Infinite-Level_02_Tangent_SmoothUV.jpg'); nor.flipY = false;
+    const col = tl.load(BASE + 'models/creature/Map-COL.webp'); col.colorSpace = THREE.SRGBColorSpace; col.flipY = false;
+    const nor = tl.load(BASE + 'models/creature/Infinite-Level_02_Tangent_SmoothUV.webp'); nor.flipY = false;
     this.creature = { bot, head: head.scene, headCol: col, headNor: nor };
   }
 

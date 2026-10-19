@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { Renderer, QUALITY } from '../render/Renderer.js';
+import { Renderer, QUALITY, detectQuality } from '../render/Renderer.js';
+import { computeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+
+// BVH-accelerated raycasting for interaction / flashlight probes
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 import { Input } from '../core/Input.js';
 import { AudioEngine } from '../core/Audio.js';
 import { Assets, MODEL_IDS } from '../world/Assets.js';
@@ -18,8 +23,8 @@ const params = new URLSearchParams(location.search);
 
 const SETTINGS_KEY = 'ashgrove.settings';
 function loadSettings() {
-  try { return { quality: 'high', sens: 1, vol: 0.9, gamma: 1, invert: false, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
-  catch { return { quality: 'high', sens: 1, vol: 0.9, gamma: 1, invert: false }; }
+  try { return { quality: null, sens: 1, vol: 0.9, gamma: 1, invert: false, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
+  catch { return { quality: null, sens: 1, vol: 0.9, gamma: 1, invert: false }; }
 }
 
 export class Game {
@@ -45,6 +50,7 @@ export class Game {
     const upd = () => { const p = prog.tex * 0.3 + prog.models * 0.45 + prog.audio * 0.15 + prog.creature * 0.1; fill.style.width = `${Math.round(p * 100)}%`; };
 
     this.renderer = new Renderer(this.canvas);
+    if (!QUALITY[this.settings.quality]) this.settings.quality = detectQuality(this.renderer.renderer);
     const r = this.renderer.renderer;
     this.assets = new Assets(r);
     this.assets.aniso = Math.min(QUALITY[this.settings.quality].aniso, r.capabilities.getMaxAnisotropy());
@@ -82,7 +88,13 @@ export class Game {
     this.renderer.setup(scene, this.camera, this.settings.quality);
     this.applySettings();
     // warm up shaders
+    // compile every material up front (incl. hidden ones: the creature, pickups) so nothing hitches mid-game
+    const hidden = [];
+    scene.traverse((o) => { if (!o.visible) { hidden.push(o); o.visible = true; } });
+    this.monster.root.position.set(6.6, 0, 1.5);
     this.renderer.renderer.compile(scene, this.camera);
+    this.renderer.render(0.016, false);
+    hidden.forEach((o) => (o.visible = false));
     this.player.updateCamera(0);
     this.renderer.render(0.016);
     prog.tex = prog.models = prog.audio = prog.creature = 1; upd();
@@ -386,7 +398,7 @@ export class Game {
       this.camera.rotation.y = -2.45 + Math.sin(t * 0.08) * 0.25;
       this.camera.position.y = 1.65 + Math.sin(t * 0.5) * 0.01;
       this.flashlight.update(dt, t, 5);
-      this.props.update(dt, t, false);
+      this.props.update(dt, t, false, this.camera.position);
       this.renderer.render(dt);
       inp.endFrame();
       return;
@@ -398,7 +410,7 @@ export class Game {
         if (inp.hit('Tab')) this.ui.showInventory(4);
         if (this.player.hidden && (inp.hit('KeyE') || inp.hit('Mouse0'))) this.unhide();
         else {
-          const cur = this.interact.update();
+          const cur = this.frameN % 2 === 0 || inp.hit('KeyE') || inp.hit('Mouse0') ? this.interact.update() : this.interact.current;
           this.ui.setPrompt(cur?.prompt);
           if (cur && (inp.hit('KeyE') || inp.hit('Mouse0'))) cur.item.use();
         }
@@ -438,8 +450,10 @@ export class Game {
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
       this.audio.setListener(this.camera.position, fwd, up);
 
-      this.props.update(dt, t, this.story.power);
-      this.flashlight.update(dt, t, this.interact.probe(this.camera.position, this.flashlight.dir));
+      this.props.update(dt, t, this.story.power, this.camera.position);
+      this.frameN = (this.frameN || 0) + 1;
+      if (this.frameN % 3 === 0) this.interact.probe(this.camera.position, this.flashlight.dir);
+      this.flashlight.update(dt, t, this.interact.lastHitDist);
       this.ui.setMeters(this.player.stamina, this.flashlight.battery, this.flashlight.has);
     }
 

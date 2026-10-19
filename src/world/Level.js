@@ -283,6 +283,9 @@ export class Level {
       mesh.receiveShadow = true;
       mesh.castShadow = true;
       mesh.name = 'level_' + matId;
+      mesh.geometry.computeBoundsTree?.();
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
       this.scene.add(mesh);
       this.meshes.push(mesh);
     }
