@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ASHGROVE</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 fill=%22%23050505%22/%3E%3Cpath d=%22M9 28V14l7-8 7 8v14h-5v-7h-4v7z%22 fill=%22%238e1111%22/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <!-- Loading -->
+  <section id="loading" class="screen">
+    <h1 class="title">ASHGROVE</h1>
+    <div class="bar"><div id="loadFill"></div></div>
+    <p id="loadText">Opening the house…</p>
+  </section>
+
+  <!-- Main menu -->
+  <section id="menu" class="screen hidden">
+    <h1 class="title">ASHGROVE</h1>
+    <p class="tagline">The house remembers. You don't.</p>
+    <nav>
+      <button id="btnStart">Enter the house</button>
+      <button id="btnSettings">Settings</button>
+      <button id="btnCredits">Credits</button>
+    </nav>
+    <p class="warn">Headphones recommended · Contains flashing lights and jump scares</p>
+  </section>
+
+  <!-- Settings (shared by menu + pause) -->
+  <section id="settings" class="screen panel hidden">
+    <h2>Settings</h2>
+    <label>Graphics quality
+      <select id="optQuality">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high" selected>High</option>
+        <option value="ultra">Ultra</option>
+      </select>
+    </label>
+    <label>Mouse sensitivity <input id="optSens" type="range" min="0.2" max="3" step="0.05" value="1" /></label>
+    <label>Master volume <input id="optVol" type="range" min="0" max="1" step="0.01" value="0.9" /></label>
+    <label>Brightness <input id="optGamma" type="range" min="0.6" max="1.8" step="0.02" value="1" /></label>
+    <label class="row"><input id="optInvert" type="checkbox" /> Invert Y</label>
+    <button id="btnSettingsBack">Back</button>
+  </section>
+
+  <section id="credits" class="screen panel hidden">
+    <h2>Credits</h2>
+    <p>Textures &amp; furniture models: <b>Poly Haven</b> (CC0)</p>
+    <p>Foley (footsteps, doors, impacts): <b>Kenney</b> (CC0)</p>
+    <p>Creature rig: <b>Mixamo X Bot</b> via three.js examples</p>
+    <p>Face scan: <b>Lee Perry-Smith</b> by Infinite-Realities (CC BY 3.0)</p>
+    <p>Fonts: Special Elite, Homemade Apple, Cormorant Garamond (OFL)</p>
+    <p>Engine: three.js · All other sound synthesised in real time</p>
+    <button id="btnCreditsBack">Back</button>
+  </section>
+
+  <!-- HUD -->
+  <section id="hud" class="hidden">
+    <div id="crosshair"></div>
+    <div id="prompt"></div>
+    <div id="objective"><span class="lbl">Objective</span><span id="objText"></span></div>
+    <div id="thought"></div>
+    <div id="inventory"></div>
+    <div id="meters">
+      <div class="meter" id="mStamina"><i></i></div>
+      <div class="meter battery" id="mBattery"><i></i></div>
+    </div>
+    <div id="hint"></div>
+  </section>
+
+  <div id="hideOverlay" class="hidden"></div>
+  <div id="damage"></div>
+  <div id="fade"></div>
+
+  <!-- Note reader -->
+  <section id="note" class="overlay hidden">
+    <article id="noteBody"></article>
+    <p class="close">[E] / [Esc] close</p>
+  </section>
+
+  <!-- Clock puzzle -->
+  <section id="clockUI" class="overlay hidden">
+    <div class="clockWrap">
+      <canvas id="clockCanvas" width="520" height="520"></canvas>
+      <div class="clockCtl">
+        <div><span>Hour</span><button data-c="h-">◀</button><button data-c="h+">▶</button></div>
+        <div><span>Minute</span><button data-c="m-">◀</button><button data-c="m+">▶</button></div>
+        <button id="clockTry" class="primary">Release the pendulum</button>
+      </div>
+    </div>
+    <p class="close">Mouse wheel / arrows: adjust · [Enter] try · [Esc] step back</p>
+  </section>
+
+  <!-- Combination lock -->
+  <section id="lockUI" class="overlay hidden">
+    <div class="lockBody">
+      <div class="lockTitle">Brass combination lock</div>
+      <div id="dials"></div>
+      <button id="lockTry" class="primary">Pull the shackle</button>
+    </div>
+    <p class="close">Click a dial: up/down · [Esc] step back</p>
+  </section>
+
+  <!-- Pause -->
+  <section id="pause" class="screen hidden">
+    <h1 class="title small">PAUSED</h1>
+    <nav>
+      <button id="btnResume">Resume</button>
+      <button id="btnPauseSettings">Settings</button>
+      <button id="btnRestart">Restart from checkpoint</button>
+    </nav>
+    <div class="keys">
+      <p><b>WASD</b> move · <b>Shift</b> sprint · <b>C / Ctrl</b> crouch · <b>E</b> interact · <b>F</b> flashlight · <b>Tab</b> inventory · <b>Esc</b> pause</p>
+    </div>
+  </section>
+
+  <!-- Death -->
+  <section id="death" class="screen hidden">
+    <h1 class="title red">IT FOUND YOU</h1>
+    <p id="deathTip"></p>
+    <nav><button id="btnRetry">Wake up again</button></nav>
+  </section>
+
+  <!-- Ending -->
+  <section id="ending" class="screen hidden">
+    <h1 class="title">DAWN</h1>
+    <p id="endText"></p>
+    <nav><button id="btnAgain">Return to the house</button></nav>
+  </section>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
