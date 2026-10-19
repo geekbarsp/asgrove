@@ -81,11 +81,14 @@ export class Game {
       this.assets.loadCreature().then(() => { prog.creature = 1; upd(); }),
       this.audio.init((p) => { prog.audio = p; upd(); }),
     ]);
-    await new Promise((res) => { if (this.assets.manager.itemsLoaded >= this.assets.manager.itemsTotal) res(); else this.assets.manager.onLoad = res; setTimeout(res, 15000); });
+    await new Promise((res) => { if (this.assets.manager.itemsLoaded >= this.assets.manager.itemsTotal) res(); else this.assets.manager.onLoad = res; setTimeout(res, 120000); });
+    text.textContent = 'Preparing the textures…';
+    await this.uploadTextures();
 
     text.textContent = 'Something is waking up…';
     this.buildWorld();
     this.renderer.setup(scene, this.camera, this.settings.quality);
+    this.renderer.onDowngrade = () => this.downgradeQuality();
     this.applySettings();
     // warm up shaders
     // compile every material up front (incl. hidden ones: the creature, pickups) so nothing hitches mid-game
@@ -156,8 +159,8 @@ export class Game {
     $('btnAgain').onclick = () => location.reload();
 
     const s = this.settings;
-    $('optQuality').value = s.quality; $('optSens').value = s.sens; $('optVol').value = s.vol; $('optGamma').value = s.gamma; $('optInvert').checked = s.invert;
-    ['optSens', 'optVol', 'optGamma', 'optInvert'].forEach((id) => { $(id).oninput = () => { this.readSettings(); this.applySettings(); }; });
+    $('optQuality').value = s.quality; $('optSens').value = s.sens; $('optVol').value = s.vol; $('optGamma').value = s.gamma; $('optInvert').checked = s.invert; $('optFps').checked = !!s.fps;
+    ['optSens', 'optVol', 'optGamma', 'optInvert', 'optFps'].forEach((id) => { $(id).oninput = () => { this.readSettings(); this.applySettings(); }; });
     $('optQuality').onchange = () => { this.readSettings(); this.saveSettings(); this.ui.hint('Quality change applies on reload', 3); };
 
     this.input.onLockChange = (locked) => {
@@ -181,12 +184,42 @@ export class Game {
     addEventListener('wheel', (e) => { if (this.state === 'overlay' && this.ui.overlay === 'clock') this.ui._clockAdj(e.deltaY > 0 ? 'm+' : 'm-'); }, { passive: true });
   }
 
+  // Upload every texture to the GPU during loading so nothing stutters the first time it comes into view.
+  async uploadTextures() {
+    const r = this.renderer.renderer;
+    const seen = new Set();
+    const keys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'];
+    const visit = (m) => keys.forEach((k) => { const t = m?.[k]; if (t && !seen.has(t)) { seen.add(t); } });
+    this.assets.textures.forEach((set) => Object.values(set).forEach((t) => seen.add(t)));
+    this.assets.materials.forEach(visit);
+    this.assets.models.forEach((root) => root.traverse((o) => { if (o.isMesh) [].concat(o.material).forEach(visit); }));
+    let i = 0;
+    for (const t of seen) {
+      if (t.image) r.initTexture(t);
+      if (++i % 12 === 0) await new Promise((res) => setTimeout(res, 0)); // keep the loading screen responsive
+    }
+  }
+
+  // Automatic step down when the device can't keep up (remembered for next visit)
+  downgradeQuality() {
+    const order = ['low', 'medium', 'high', 'ultra'];
+    const i = order.indexOf(this.settings.quality);
+    if (i <= 0) return;
+    this.settings.quality = order[i - 1];
+    this.saveSettings();
+    this.renderer.setup(this.scene, this.camera, this.settings.quality);
+    this.applySettings();
+    $('optQuality').value = this.settings.quality;
+    console.info('[ashgrove] performance: quality lowered to', this.settings.quality);
+  }
+
   readSettings() {
     const s = this.settings;
-    s.quality = $('optQuality').value; s.sens = +$('optSens').value; s.vol = +$('optVol').value; s.gamma = +$('optGamma').value; s.invert = $('optInvert').checked;
+    s.quality = $('optQuality').value; s.sens = +$('optSens').value; s.vol = +$('optVol').value; s.gamma = +$('optGamma').value; s.invert = $('optInvert').checked; s.fps = $('optFps').checked;
   }
   saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings)); } catch {} }
   applySettings() {
+    $('fps').classList.toggle('hidden', !this.settings.fps);
     const s = this.settings;
     this.input.sensitivity = s.sens;
     this.input.invertY = s.invert;
@@ -468,6 +501,10 @@ export class Game {
     }
     this.ui.setDamage(this.state === 'dead' ? 0.6 : 0);
     this.ui.update(dt);
+    if (this.settings.fps && (this.fpsT = (this.fpsT || 0) + dt) > 0.5) {
+      this.fpsT = 0;
+      $('fps').textContent = `${this.renderer.fps} fps · ${this.settings.quality} · ${Math.round(this.renderer.scale * 100)}%`;
+    }
     this.renderer.render(dt);
     inp.endFrame();
   }

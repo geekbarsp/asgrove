@@ -13,8 +13,8 @@ import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 export const QUALITY = {
   low: { maxScale: 0.75, minScale: 0.5, shadow: 512, softShadows: false, ao: false, bloom: false, aa: 'fxaa', lights: 2, extraLights: false, aniso: 2, dust: 300 },
   medium: { maxScale: 1, minScale: 0.6, shadow: 1024, softShadows: false, ao: false, bloom: true, aa: 'fxaa', lights: 3, extraLights: true, aniso: 4, dust: 500 },
-  high: { maxScale: 1.25, minScale: 0.7, shadow: 1024, softShadows: true, ao: false, bloom: true, aa: 'fxaa', lights: 4, extraLights: true, aniso: 8, dust: 700 },
-  ultra: { maxScale: 2, minScale: 0.85, shadow: 2048, softShadows: true, ao: true, bloom: true, aa: 'smaa', lights: 6, extraLights: true, aniso: 16, dust: 900 },
+  high: { maxScale: 1.25, minScale: 0.6, shadow: 1024, softShadows: true, ao: false, bloom: true, aa: 'fxaa', lights: 4, extraLights: true, aniso: 8, dust: 700 },
+  ultra: { maxScale: 1.5, minScale: 0.7, shadow: 2048, softShadows: true, ao: true, bloom: true, aa: 'smaa', lights: 6, extraLights: true, aniso: 16, dust: 900 },
 };
 
 // Pick a sensible default from the GPU name (integrated / mobile GPUs start lower).
@@ -25,8 +25,7 @@ export function detectQuality(renderer) {
     const name = (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) || '';
     if (/swiftshader|llvmpipe|software|microsoft basic/i.test(name)) return 'low';
     if (/intel|uhd|iris|mali|adreno|powervr|apple gpu|vega \d+ graphics|radeon\(tm\) graphics/i.test(name)) return 'medium';
-    if (/rtx\s*(30|40|50)|rx\s*(6[789]|7[789]|9)\d{2}|apple m\d (pro|max|ultra)/i.test(name)) return 'ultra';
-    return 'high';
+    return 'high'; // Ultra is opt-in only: it is far heavier on high-DPI and laptop displays
   } catch { return 'medium'; }
 }
 
@@ -103,6 +102,9 @@ export class Renderer {
     this.scale = 1;
     this.frameTimes = [];
     this.adaptT = 0;
+    this.slowWindows = 0;
+    this.onDowngrade = null; // called when even the minimum render scale can't hold the frame rate
+    this.fps = 0;
   }
 
   get dpr() { return Math.min(window.devicePixelRatio || 1, 2); }
@@ -119,6 +121,7 @@ export class Renderer {
     const w = innerWidth, h = innerHeight;
     r.setSize(w, h, false);
 
+    this.composer?.passes.forEach((p) => p.dispose?.());
     this.composer?.dispose();
     const comp = new EffectComposer(r, new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 0 }));
     comp.setPixelRatio(r.getPixelRatio());
@@ -173,16 +176,20 @@ export class Renderer {
   _adapt(dt) {
     this.frameTimes.push(dt);
     this.adaptT += dt;
-    if (this.adaptT < 1.5) return;
+    if (this.adaptT < 1.0) return;
     const ft = this.frameTimes.slice().sort((a, b) => a - b);
     const p75 = ft[Math.floor(ft.length * 0.75)];
     this.frameTimes.length = 0;
     this.adaptT = 0;
+    this.fps = Math.round(1 / p75);
     const max = Math.min(this.q.maxScale, this.dpr), min = this.q.minScale;
     let next = this.scale;
     if (p75 > 1 / 50 && this.scale > min) next = Math.max(min, this.scale - (p75 > 1 / 30 ? 0.2 : 0.1));
     else if (p75 < 1 / 75 && this.scale < max) next = Math.min(max, this.scale + 0.05);
     if (Math.abs(next - this.scale) > 0.01) { this.scale = next; this._applySize(); }
+    // still slow at the lowest scale for a few seconds -> drop a quality preset
+    this.slowWindows = p75 > 1 / 45 && this.scale <= min + 0.01 ? this.slowWindows + 1 : 0;
+    if (this.slowWindows >= 3 && this.onDowngrade) { this.slowWindows = 0; this.onDowngrade(); }
   }
 
   render(dt, adapt = true) {

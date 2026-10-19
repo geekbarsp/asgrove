@@ -44,6 +44,7 @@
     <label>Master volume <input id="optVol" type="range" min="0" max="1" step="0.01" value="0.9" /></label>
     <label>Brightness <input id="optGamma" type="range" min="0.6" max="1.8" step="0.02" value="1" /></label>
     <label class="row"><input id="optInvert" type="checkbox" /> Invert Y</label>
+    <label class="row"><input id="optFps" type="checkbox" /> Show FPS</label>
     <button id="btnSettingsBack">Back</button>
   </section>
 
@@ -72,6 +73,7 @@
     <div id="hint"></div>
   </section>
 
+  <div id="fps" class="hidden"></div>
   <div id="hideOverlay" class="hidden"></div>
   <div id="damage"></div>
   <div id="fade"></div>

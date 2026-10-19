@@ -3,6 +3,7 @@
 import puppeteer from 'puppeteer-core';
 
 const query = process.argv[2] || 'debug&nolock&flags=flashlight,power,cellar';
+const origin = process.argv[3] || 'http://localhost:5173';
 const browser = await puppeteer.launch({
   executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
   headless: 'new',
@@ -12,9 +13,9 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 const t0 = Date.now();
-await page.goto(`http://localhost:5173/?${query}`);
+await page.goto(`${origin}/?${query}`);
 await page.waitForFunction(() => window.game?.state === 'playing', { timeout: 180000 });
-console.log('load ms', Date.now() - t0);
+console.log('load ms', Date.now() - t0, await page.evaluate(() => { const r = window.game.renderer; const gl = r.renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return { quality: window.game.settings.quality, scale: r.scale, dpr: devicePixelRatio, gpu: e && gl.getParameter(e.UNMASKED_RENDERER_WEBGL) }; }));
 const spots = [['bedroom', 7.5, 3.2, 1.9], ['hallway', 1.2, 6.75, -1.57], ['parlour', 14.2, 9.2, -2.5], ['dining', 24, 9, -2.2], ['cellar', 21.5, 31, 2.35]];
 for (const [name, x, z, yaw] of spots) {
   const r = await page.evaluate(async (x, z, yaw) => {

@@ -107,3 +107,5 @@ select, input[type=range] { accent-color: #8e1111; font-family: inherit; backgro
 .dial { width: 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .dial button { width: 64px; padding: 2px; font-size: 14px; border-color: rgba(0, 0, 0, .4); color: #e3cf98; }
 .dial .num { width: 64px; height: 84px; display: flex; align-items: center; justify-content: center; font-size: 46px; color: #1b140a; background: linear-gradient(to bottom, #6b6150, #d9d0b8 30%, #f2ead4 50%, #d9d0b8 70%, #6b6150); border-radius: 6px; box-shadow: inset 0 0 10px rgba(0, 0, 0, .6); font-family: 'Cormorant', serif; }
+
+#fps { position: fixed; right: 12px; bottom: 10px; z-index: 30; font-size: 12px; color: #9a927f; text-shadow: 0 0 4px #000; pointer-events: none; letter-spacing: .05em; }
